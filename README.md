@@ -1,19 +1,49 @@
-# Vault TPM-Backed Cert Auth Lab
+# Vault TPM Authentication Lab
 
-A self-contained lab that shows a machine authenticating to HashiCorp Vault with a TLS
-client certificate whose private key was generated **inside a TPM** and can never be
-exported from it. Vault's PKI engine signs the device's CSR, the cert auth method
-validates the resulting certificate over mTLS and hands back a short-lived token scoped
-to a single secret. This matters because the usual alternatives — a bearer token in a
-file, or a PEM private key on disk — can be copied off the machine and replayed
-anywhere; a TPM-held key cannot. The lab's negative tests prove it: the same key blob,
-presented against a different TPM, simply fails the handshake.
+A self-contained Vault Enterprise lab showing three progressively stronger TPM-backed
+workflows:
 
-![Topology](docs/diagrams/topology.png)
+1. A machine logs in directly with `vault login -method=tpm`.
+2. One workload uses a normal localhost URL while Vault Agent performs TPM
+   authentication and manages its token.
+3. Payments and analytics workloads use separate, owner-only Unix sockets, fixed roles
+   and TPM-backed application keys.
+
+The original generic `auth/cert` flow remains available as `task demo:bonus`. It shows
+an OpenSSL client using a TPM-held TLS key, manual token handling, negative tests and
+the reason one shared device certificate cannot isolate local applications.
+
+![Two application workloads using role-fixed Vault Agent proxies and one shared TPM](docs/diagrams/proxy-boundary.png)
+
+## Demo workflows
+
+### 1. Direct machine login
+
+`task demo:cli` prints and runs native `vault tpm attest` and
+`vault login -method=tpm` commands. The CLI receives a `device-read` token, reads the
+device secret and revokes the demonstration token.
+
+### 2. One workload through a standard URL
+
+`task demo:proxy` starts Vault Agent at `http://127.0.0.1:8100`. The application sends
+ordinary Vault requests while Agent performs TPM authentication, renewal and token
+injection. This workflow demonstrates token automation, not local process isolation.
+
+### 3. Multiple isolated workloads
+
+`task demo:multi-app` gives payments and analytics separate role-fixed agents and
+owner-only Unix sockets. Each application reads its own secret; cross-socket access,
+cross-secret access and caller-supplied broader tokens are rejected.
+
+See [`docs/demo-output.txt`](docs/demo-output.txt) for a complete captured run without
+setting up the VM.
 
 ## Prerequisites
 
 Everything runs on a macOS host driving an Ubuntu 24.04 VM via Multipass.
+
+Vault TPM authentication requires Vault Enterprise `2.2.0-rc1+ent`. Put the Enterprise
+licence at `.vault-license` before running `task all`.
 
 | Tool | Why |
 |---|---|
@@ -21,12 +51,12 @@ Everything runs on a macOS host driving an Ubuntu 24.04 VM via Multipass.
 | `task` ([go-task](https://taskfile.dev)) | runs everything — required |
 | `jq` | parses Vault JSON — required |
 | `git` | required |
-| `graphviz` | optional — only to re-render the diagrams with `task docs:diagram` |
+| `graphviz`, `librsvg` | optional — only to re-render diagrams with `task docs:diagram` |
 | `shellcheck`, `gitleaks`, `pre-commit` | optional — only for `task lint` |
 
 ```bash
 brew install --cask multipass
-brew install go-task jq graphviz shellcheck gitleaks pre-commit
+brew install go-task jq graphviz librsvg shellcheck gitleaks pre-commit
 ```
 
 ## Quick start
@@ -35,11 +65,13 @@ brew install go-task jq graphviz shellcheck gitleaks pre-commit
 task deps    # verify host tooling
 task init    # one-time project setup (pre-commit hooks, .env)
 task all     # launch the VM, provision it, start the TPMs and Vault, enrol node01
-task demo    # the narrated walkthrough, including every negative test
+task demo    # direct CLI → HTTP proxy → isolated multi-app proxies
+task demo:bonus # optional generic cert-auth walkthrough and negative tests
 ```
 
 `task all` takes a few minutes on first run; each of its steps is idempotent and
-individually re-runnable. `task demo` takes under a minute.
+individually re-runnable. The multi-app workflow pauses between TPM attestations because
+the TPM auth backend rate-limits certificate acquisition per endorsement key.
 
 ## All tasks
 
@@ -48,7 +80,7 @@ task --list
 ```
 
 That is the authoritative catalogue — build steps, individual demo segments,
-`task shell`, and `task logs:tpm` / `task logs:vault` for the two systemd units.
+`task shell`, and `task logs:tpm` / `task logs:vault` for the core services.
 
 ## Documentation
 

@@ -25,7 +25,7 @@ Run `task --list` for the authoritative version. Grouped by purpose:
 
 | Task | Purpose |
 |---|---|
-| `deps` | Check host dependencies (multipass, task, jq, git; optional graphviz, shellcheck, gitleaks, pre-commit) |
+| `deps` | Check host dependencies (multipass, task, jq, git; optional graphviz, librsvg, shellcheck, gitleaks, pre-commit) |
 | `init` | One-time setup — install pre-commit hooks, seed `.env` |
 
 **VM lifecycle**
@@ -37,33 +37,38 @@ Run `task --list` for the authoritative version. Grouped by purpose:
 | `stop` (`down`) | Stop the VM, keeping lab state on disk |
 | `shell` | Interactive shell in the VM |
 | `clean` | Delete and purge the VM entirely |
-| `rebuild` | `clean`, then `lab` |
+| `rebuild` | `clean`, then `all` |
 
 **Lab build** — each step idempotent and individually re-runnable
 
 | Task | Purpose |
 |---|---|
-| `lab` | launch → provision → tpm → vault → config → enrol |
+| `all` | launch → provision → tpm → vault → config → enrol |
 | `provision` | Part 1: install TPM tooling and Vault in the VM |
 | `tpm` | Part 2: start both software TPMs as systemd units |
 | `vault` | Part 3: start the Vault dev server (TLS) as a systemd unit |
-| `config` | Parts 4–5: PKI device CA, KV secret, policy, cert auth |
+| `config` | Parts 4–5: PKI, KV, policies, cert auth, native TPM auth roles, enrolment AppRole and orchestrator token |
 | `enrol` | Part 6: create the device key in the TPM and enrol it with Vault |
 
 **Demo**
 
 | Task | Purpose |
 |---|---|
-| `demo` | The full narrated run (Parts 6–8) |
+| `demo` | Three primary workflows: direct CLI, HTTP proxy, isolated multi-app proxies |
 | `demo:nonexportable` | The key file is a TPM-wrapped blob, not a private key |
-| `demo:login` | Part 7: mTLS login with the TPM-held key |
-| `demo:privilege` | Part 7.3: read succeeds, write denied |
-| `demo:negative` | Part 8: all five negative tests in order |
+| `demo:cli` | Workflow 1: native `vault login -method=tpm` from the machine |
+| `proxy` / `demo:proxy` | Workflow 2: one workload uses localhost HTTP while Agent manages its token |
+| `proxies` / `demo:multi-app` | Workflow 3: per-app agents on owner-only Unix sockets |
+| `demo:bonus` | Original generic cert-auth walkthrough and its limitations |
+| `demo:login` | Bonus: mTLS cert-auth login with the TPM-held OpenSSL key |
+| `demo:privilege` | Bonus: manually use the cert-auth token; read succeeds, write denied |
+| `demo:negative` | Bonus: all five generic cert-auth negative tests |
 | `demo:negative:stolen-key` | 8.1: the blob is useless against a different TPM |
 | `demo:negative:no-cert` | 8.2: login without a client certificate |
 | `demo:negative:untrusted-ca` | 8.3: cert must chain to the device CA |
 | `demo:negative:wrong-cn` | 8.4: trusted CA, wrong common name |
 | `demo:negative:revoked-token` | 8.5: a revoked token can no longer read |
+| `demo:shared-host` | Bonus: one generic certificate can select either cert-auth role |
 
 **Maintenance**
 
@@ -72,7 +77,8 @@ Run `task --list` for the authoritative version. Grouped by purpose:
 | `reset` | Wipe lab state inside the VM, keep the VM |
 | `logs` / `logs:tpm` / `logs:vault` | Journals for `swtpm@device`, `swtpm@attacker`, `vault-dev` |
 | `lint` | pre-commit: shellcheck, gitleaks |
-| `docs:diagram` | Re-render `docs/diagrams/*.dot` to PNG (needs graphviz) |
+| `docs:diagram` | Re-render Graphviz and SVG diagrams (needs graphviz and librsvg) |
+| `docs:demo-output` | Run the primary demo and refresh the checked-in transcript |
 
 ## Conventions
 
@@ -84,7 +90,7 @@ Run `task --list` for the authoritative version. Grouped by purpose:
   `multipass exec … sudo -E bash $VM_STAGE/NN_*.sh <args>`. Scripts therefore run as
   **root**, and each resolves its own location into `STAGE_DIR` and sources
   `"${STAGE_DIR}/common.sh"` — never a hardcoded path, so the staging directory can move.
-  All scripts are transferred every time, because the Part 8 demos invoke `50_login.sh`
+ All scripts are transferred every time, because the bonus negative demos invoke `50_login.sh`
   directly.
 
   Temp files: the **host** uses the project-local `.tmp/` (never `/tmp`, never the
@@ -95,7 +101,7 @@ Run `task --list` for the authoritative version. Grouped by purpose:
   will later use them, and lab artefacts must not end up root-owned.
 - **Idempotence is required.** Any script may be re-run at any time. Use `wait_for_unit`
   for readiness rather than `sleep`, and `write_if_changed` before reloading systemd.
-- **Reporting, not asserting.** The Part 8 scripts print expected-vs-actual via
+- **Reporting, not asserting.** The bonus negative scripts print expected-vs-actual via
   `report_expect` and let the operator judge, rather than failing the task.
 - **Linting.** All shell must pass `shellcheck --severity=warning`; `task lint` runs the
   pre-commit hooks including gitleaks.
@@ -104,24 +110,32 @@ Run `task --list` for the authoritative version. Grouped by purpose:
 ## Gotchas
 
 - **Vault dev mode is in-memory.** Restarting `vault-dev` wipes the PKI mount, the
-  policy, cert auth and the KV secret. The fix is always `task config && task enrol` —
+  policies, cert auth, the KV secret and every token — including the orchestrator token
+  at `~/lab/state/orchestrator.token`. The fix is always `task config && task enrol` —
   never a full rebuild.
 - **Never "fix" the demo with a software key.** If the TPM path fails, diagnose the TPM
   path. Generating a plain EC key and pointing OpenSSL at it makes every command succeed
   and destroys the entire point of the lab.
-- **Device enrolment does not use the root token.** `task enrol` mints a
-  response-wrapped, one-shot AppRole SecretID as the *operator*
-  (`vault write -f -wrap-ttl=120s auth/approle/role/device-enrol/secret-id`), then
-  redeems it as the *device* (`vault unwrap` → `auth/approle/login` →
+- **Device enrolment does not use the root token — on either side.** `task enrol` mints
+  a response-wrapped, one-shot AppRole SecretID as the *orchestrator*, using the scoped
+  token `task config` leaves at `~/lab/state/orchestrator.token` (policy
+  `enrol-orchestrator`: `update` on `auth/approle/role/device-enrol/secret-id` with
+  `min_wrapping_ttl` making the wrap mandatory, `read` on `.../role-id`, nothing else).
+  It then redeems it as the *device* (`vault unwrap` → `auth/approle/login` →
   `pki/sign/devices`). The resulting `device-enrol` token carries exactly one
   capability: `update` on `pki/sign/devices`. `task config` still uses root, and that is
-  correct — it is the operator provisioning trust, not a device authenticating.
-- **The operator/device split in `scripts/40_enrol_device.sh` is the point.** It is two
-  privilege domains in one script, deliberately. Do not "simplify" it by signing the CSR
+  correct — it is the operator provisioning trust, not a device authenticating, and
+  issuing the orchestrator its token is part of that same job.
+- **The orchestrator/device split in `scripts/40_enrol_device.sh` is the point.** It is
+  two privilege domains in one script, deliberately — three counting the operator who
+  configured both in `task config`. Do not "simplify" it by signing the CSR
   with the root token, by skipping the wrap and passing the SecretID directly, or by
-  giving the `device-enrol` policy anything beyond its single capability. Each of those
-  makes the script shorter and deletes what it demonstrates. See
-  `docs/architecture.md` → Trust model.
+  giving the `device-enrol` policy anything beyond its single capability. Nor by putting
+  root back in 6.4.1 because it is two lines shorter, nor by widening
+  `enrol-orchestrator` so the old `vault read auth/approle/role/device-enrol` preflight
+  works again — reading `.../role-id` *is* the check, precisely because that is all the
+  orchestrator may read. Each of those makes the script shorter and deletes what it
+  demonstrates. See `docs/architecture.md` → Trust model.
 - **The attacker TPM is not a spare.** `swtpm@attacker` on :2331 exists solely so Part
   8.1 can present the device's key blob to a TPM with a different storage seed. It must
   keep its own state directory and must never share a seed with `swtpm@device`.

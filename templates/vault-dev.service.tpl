@@ -23,7 +23,7 @@ Type=simple
 User=${LAB_USER}
 Group=${LAB_USER}
 WorkingDirectory=${LAB_DIR}
-ExecStart=/usr/bin/vault server -dev -dev-tls -dev-root-token-id=root -dev-tls-cert-dir=${LAB_TLS_DIR}
+ExecStart=/usr/local/bin/vault server -dev -dev-tls -dev-root-token-id=root -dev-tls-cert-dir=${LAB_TLS_DIR}
 Restart=on-failure
 RestartSec=2
 

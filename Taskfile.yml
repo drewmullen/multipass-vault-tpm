@@ -38,7 +38,7 @@ tasks:
   # Host
   # ==========================================================================
   deps:
-    desc: Check host dependencies (multipass, task, jq, graphviz)
+    desc: Check host dependencies (multipass, task, jq; optional graphviz/librsvg)
     cmd: ./scripts/host/deps.sh
 
   init:
@@ -141,13 +141,24 @@ tasks:
         vars: {SCRIPT: 10_tpm_unit.sh, ARGS: '{{.TPM_PORT}} {{.ATTACKER_TPM_PORT}}'}
 
   vault:
-    desc: 'Part 3: start the Vault dev server (TLS) as a systemd unit'
+    desc: 'Part 3: start Vault Enterprise (TLS); needs .vault-license on the host'
     cmds:
+      - |
+        set -euo pipefail
+        LICENSE_FILE="${VAULT_LICENSE_FILE:-.vault-license}"
+        if [[ ! -s "${LICENSE_FILE}" ]]; then
+          echo "Vault Enterprise needs a license." >&2
+          echo "Put it at ${LICENSE_FILE} (or set VAULT_LICENSE_FILE) and re-run 'task vault'." >&2
+          echo "Trial licenses: https://vaultproject.io/trial" >&2
+          exit 1
+        fi
+        multipass exec {{.NAME}} -- mkdir -p {{.LAB_DIR}}
+        multipass transfer "${LICENSE_FILE}" {{.NAME}}:{{.LAB_DIR}}/vault.hclic
       - task: _run
         vars: {SCRIPT: 20_vault_unit.sh}
 
   config:
-    desc: 'Parts 4-5: configure PKI device CA, KV secret, policy and cert auth'
+    desc: 'Parts 4-5: configure PKI, policies, cert auth and native TPM auth roles'
     cmds:
       - task: _run
         vars: {SCRIPT: 30_vault_config.sh, ARGS: '{{.DOMAIN}}'}
@@ -162,21 +173,62 @@ tasks:
   # Demo
   # ==========================================================================
   demo:
-    desc: Run the full narrated demonstration (Parts 6-8)
+    desc: Run the three primary workflows (CLI, HTTP proxy, isolated multi-app)
     cmds:
       - task: demo:nonexportable
+      - task: demo:cli
+      - task: demo:proxy
+      - task: demo:multi-app
+
+  demo:cli:
+    desc: 'Workflow 1: native TPM login from the machine with Vault CLI'
+    cmds:
+      - task: _run
+        vars: {SCRIPT: 50_tpm_cli.sh, ARGS: '{{.DEVICE_NAME}} {{.DOMAIN}}'}
+
+  proxy:
+    desc: 'Workflow 2: start one TPM-authenticated Agent proxy on localhost HTTP'
+    cmds:
+      - task: _run
+        vars: {SCRIPT: 81_single_proxy.sh, ARGS: '{{.DEVICE_NAME}} {{.DOMAIN}}'}
+
+  demo:proxy:
+    desc: 'Workflow 2: workload uses a normal URL while Agent manages its token'
+    cmds:
+      - task: proxy
+      - task: _run
+        vars: {SCRIPT: 82_single_proxy_demo.sh}
+
+  proxies:
+    desc: 'Workflow 3: start per-app TPM agents on owner-only Unix sockets'
+    cmds:
+      - task: _run
+        vars: {SCRIPT: 81_app_proxies.sh, ARGS: '{{.DEVICE_NAME}} {{.DOMAIN}}'}
+
+  demo:multi-app:
+    desc: 'Workflow 3: prove cross-user socket and secret access is rejected'
+    cmds:
+      - task: proxies
+      - task: _run
+        vars: {SCRIPT: 82_proxy_boundary.sh}
+
+  # Bonus: the original generic cert-auth path and its negative tests.
+  demo:bonus:
+    desc: Bonus cert-auth walkthrough, privilege check, negatives and shared-host gap
+    cmds:
       - task: demo:login
       - task: demo:privilege
       - task: demo:negative
+      - task: demo:shared-host
 
   demo:login:
-    desc: 'Part 7: authenticate to Vault using the TPM-held key'
+    desc: 'Bonus: generic auth/cert login with a TPM-held OpenSSL key'
     cmds:
       - task: _run
         vars: {SCRIPT: 50_login.sh, ARGS: '{{.DEVICE_NAME}}'}
 
   demo:privilege:
-    desc: 'Part 7.3: device token can read its secret but not write it'
+    desc: 'Bonus: manually use the cert-auth token and show least privilege'
     cmds:
       - task: _run
         vars: {SCRIPT: 60_privilege.sh, ARGS: '{{.DEVICE_NAME}}'}
@@ -188,7 +240,7 @@ tasks:
         vars: {SCRIPT: 45_nonexportable.sh, ARGS: '{{.DEVICE_NAME}}'}
 
   demo:negative:
-    desc: 'Part 8: every negative test, in order'
+    desc: 'Bonus: every generic cert-auth negative test, in order'
     cmds:
       - task: demo:negative:stolen-key
       - task: demo:negative:no-cert
@@ -226,6 +278,12 @@ tasks:
       - task: _run
         vars: {SCRIPT: 74_negative_revoked_token.sh, ARGS: '{{.DEVICE_NAME}}'}
 
+  demo:shared-host:
+    desc: 'Bonus: one generic certificate can select either cert-auth role'
+    cmds:
+      - task: _run
+        vars: {SCRIPT: 80_shared_host.sh, ARGS: '{{.DEVICE_NAME}}'}
+
   # ==========================================================================
   # Maintenance
   # ==========================================================================
@@ -241,26 +299,36 @@ tasks:
     cmd: pre-commit run --all-files
 
   docs:diagram:
-    desc: Render the architecture diagrams from Graphviz sources to PNG
+    desc: Render the architecture diagrams to PNG
     cmds:
       - |
         if ! command -v dot >/dev/null 2>&1; then
           echo "graphviz not found. Install it with: brew install graphviz" >&2
           exit 1
         fi
+        if ! command -v rsvg-convert >/dev/null 2>&1; then
+          echo "rsvg-convert not found. Install it with: brew install librsvg" >&2
+          exit 1
+        fi
       - for: [topology, enrolment]
         cmd: dot -Tpng -Gdpi=144 -o docs/diagrams/{{.ITEM}}.png docs/diagrams/{{.ITEM}}.dot
-      - echo "Rendered docs/diagrams/topology.png and docs/diagrams/enrolment.png"
+      - rsvg-convert --zoom 1.5 -o docs/diagrams/proxy-boundary.png docs/diagrams/proxy-boundary.svg
+      - echo "Rendered docs/diagrams/{topology,enrolment,proxy-boundary}.png"
     sources:
       - docs/diagrams/*.dot
+      - docs/diagrams/*.svg
     generates:
       - docs/diagrams/*.png
+
+  docs:demo-output:
+    desc: Run the primary demo and refresh docs/demo-output.txt
+    cmd: task --silent demo > docs/demo-output.txt 2>&1
 
   # ==========================================================================
   # Internal: sync scripts into the VM and run one
   # ==========================================================================
   # All scripts are transferred every time, not just the one being run: the
-  # Part 8 negative demos invoke 50_login.sh directly, so the whole set has to
+  # Bonus negative demos invoke 50_login.sh directly, so the whole set has to
   # be present. Transfers are local and cheap, and this keeps the VM copy from
   # drifting behind the working tree mid-demo.
   _sync:

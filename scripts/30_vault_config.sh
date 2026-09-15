@@ -16,13 +16,19 @@ DEMO_DEVICE="node01"
 CA_PEM="${LAB_PKI_DIR}/lab_device_ca.pem"
 SENTINEL="${LAB_STATE_DIR}/config.json"
 
+# The provisioning orchestrator: the identity that mints enrolment credentials.
+# Scoped to exactly that, and created here because issuing it is part of the same
+# trust-establishing job as everything else in Parts 4-5. See Part 5.5 below.
+ORCH_POLICY="enrol-orchestrator"
+ORCH_TOKEN_FILE="${LAB_STATE_DIR}/orchestrator.token"
+
 # Vault CLI output is captured as root, so ownership has to be applied on the
 # way to disk rather than relying on the creating process.
 write_lab_file() {
-  local dest="$1" tmp
+  local dest="$1" mode="${2:-0644}" tmp
   tmp="$(mktemp)"
   cat > "${tmp}"
-  install -o "${LAB_USER}" -g "${LAB_USER}" -m 0644 "${tmp}" "${dest}"
+  install -o "${LAB_USER}" -g "${LAB_USER}" -m "${mode}" "${tmp}" "${dest}"
   rm -f "${tmp}"
 }
 
@@ -206,6 +212,171 @@ enrol_role_id="$(as_lab_user vault read -field=role_id auth/approle/role/device-
 log_detail "RoleID:   ${enrol_role_id}"
 log_ok "AppRole device-enrol ready — SecretID is minted per enrolment, not here"
 
+log_step "Part 5.5: the orchestrator credential that mints enrolment SecretIDs"
+# Minting a SecretID is itself privileged: whoever can do it can obtain a device
+# certificate for any name the 'devices' role allows. Part 6 used to mint with
+# the dev root token, which left the operator side of enrolment holding unlimited
+# privilege in the very step whose point is least privilege on the device side.
+#
+# So the provisioning system gets an identity of its own: two paths, and nothing
+# else. It cannot sign a CSR, read a secret, alter the cert auth trust anchor or
+# mint credentials for any other role. Same idea as 'device-enrol' above, one
+# level up the chain — and the two together are what 'task enrol' demonstrates.
+log_info "Writing the '${ORCH_POLICY}' policy (mint enrolment SecretIDs only)"
+as_lab_user vault policy write "${ORCH_POLICY}" - <<'EOF'
+# Mint enrolment credentials for the device-enrol role. This is the whole job.
+#
+# min_wrapping_ttl is the interesting line. Response wrapping normally costs no
+# permission at all — Vault authorises the call against this path as usual and
+# wraps the reply afterwards — so an orchestrator with 'update' could equally
+# well mint a bare SecretID and hand it over in the clear. Setting a minimum
+# makes wrapping mandatory: an unwrapped mint against this path is denied.
+# Tamper-evidence stops being a convention the script happens to follow and
+# becomes something the policy enforces.
+path "auth/approle/role/device-enrol/secret-id" {
+  capabilities     = ["update"]
+  min_wrapping_ttl = "10s"
+  max_wrapping_ttl = "300s"
+}
+
+# Read the RoleID to hand to the device alongside the wrapping token. Public by
+# design — it names the role, it does not authorise anything on its own.
+path "auth/approle/role/device-enrol/role-id" {
+  capabilities = ["read"]
+}
+EOF
+log_ok "policy ${ORCH_POLICY} written"
+
+# Vault dev mode is in-memory, so in practice Vault has already forgotten any
+# earlier token by the time this re-runs. Against a live Vault it would not
+# have: a re-run would leave the previous orchestrator token valid for the rest
+# of its TTL and referenced by nothing. Revoke first, so re-running 'task
+# config' narrows standing privilege rather than accumulating it.
+if [[ -s "${ORCH_TOKEN_FILE}" ]]; then
+  if as_lab_user_allow_fail vault token revoke "$(cat "${ORCH_TOKEN_FILE}")" >/dev/null 2>&1; then
+    log_detected "a previous orchestrator token" "revoked before minting its replacement"
+  else
+    log_detected "a stale orchestrator token" "already expired, or gone with the last Vault restart"
+  fi
+fi
+
+log_info "Minting the orchestrator token (24h, policy ${ORCH_POLICY})"
+# -ttl, not -period: a periodic token renews for ever, which is the right shape
+# for a long-running agent and the wrong one for a demonstration of bounded
+# privilege. 24h outlives any demo session, and a Vault restart kills it sooner.
+#
+# -no-default-policy so the transcript shows exactly the two paths above.
+# 'default' is harmless — cubbyhole and token self-lookup — but nothing in the
+# enrolment flow calls those, and "policies: [enrol-orchestrator]" is the claim.
+orch_json="$(as_lab_user vault token create \
+  -policy="${ORCH_POLICY}" \
+  -no-default-policy \
+  -ttl=24h \
+  -display-name="${ORCH_POLICY}" \
+  -format=json)"
+orch_token="$(printf '%s' "${orch_json}" | jq -r '.auth.client_token // empty')"
+[[ -n "${orch_token}" ]] || die "vault token create returned no client_token for ${ORCH_POLICY}"
+
+# 0600, not 0644: every other lab artefact is a public key, a certificate or a
+# serial number. This one is a bearer credential.
+printf '%s' "${orch_token}" | write_lab_file "${ORCH_TOKEN_FILE}" 0600
+log_ok "orchestrator token at ${ORCH_TOKEN_FILE} (owner ${LAB_USER}, mode 0600)"
+log_detail "Policies: $(printf '%s' "${orch_json}" | jq -r '.auth.policies | join(", ")')"
+log_detail "TTL:      $(printf '%s' "${orch_json}" | jq -r '.auth.lease_duration')s"
+log_detail "It can mint enrolment SecretIDs, and must wrap them. It cannot sign a CSR,"
+log_detail "read a secret, touch cert auth, or read the device-enrol role's own config."
+
+# --- Part 5.6: two applications, one TPM ------------------------------------
+# These two roles are the shared-host case. Each policy can read only its own
+# secret. Both roles trust the same device CA and the same common names as
+# tpm-devices, so the single enrolled certificate satisfies either role. The
+# login request names the role. Nothing in the TPM credential says which
+# application is calling. The bonus shared-host task demonstrates the gap.
+log_step "Part 5.6: two application roles on the same device certificate"
+
+as_lab_user vault kv put secret/payments/app \
+  message="payments settlement batch"
+as_lab_user vault kv put secret/analytics/app \
+  message="analytics risk model"
+
+as_lab_user vault policy write payments-read - <<'EOF'
+path "secret/data/payments/*" {
+  capabilities = ["read"]
+}
+EOF
+as_lab_user vault policy write analytics-read - <<'EOF'
+path "secret/data/analytics/*" {
+  capabilities = ["read"]
+}
+EOF
+log_ok "policies payments-read and analytics-read written"
+
+# Same trust anchor and name constraint as tpm-devices, on purpose. Re-running
+# 'vault write' resets each role to this shape.
+as_lab_user vault write auth/cert/certs/payments-app \
+  display_name=payments-app \
+  certificate=@"${CA_PEM}" \
+  allowed_common_names="*.${DOMAIN}" \
+  token_policies=payments-read \
+  token_ttl=15m \
+  token_max_ttl=1h
+as_lab_user vault write auth/cert/certs/analytics-app \
+  display_name=analytics-app \
+  certificate=@"${CA_PEM}" \
+  allowed_common_names="*.${DOMAIN}" \
+  token_policies=analytics-read \
+  token_ttl=15m \
+  token_max_ttl=1h
+log_ok "cert roles payments-app and analytics-app both trust *.${DOMAIN}"
+
+# --- Part 5.7: Vault Enterprise TPM auth for the per-app agent -------------
+# The bonus path uses cert auth (caller picks the role). The primary workflows
+# use auth/tpm: Vault CLI or Agent attests the host TPM and logs in as a fixed role.
+log_step "Part 5.7: auth/tpm for the per-application agents"
+
+[[ -S "${SWTPM_UNIX_SOCK}" ]] \
+  || die "no ${SWTPM_UNIX_SOCK} — run 'task tpm' so the unix bridge is up"
+
+if mount_enabled auth "tpm/"; then
+  log_detected "the tpm auth method already enabled" "skipping enable"
+else
+  log_info "Enabling the tpm auth method"
+  as_lab_user vault auth enable tpm
+fi
+
+as_lab_user vault write auth/tpm/config default_cert_ttl=2160h
+log_ok "auth/tpm config written"
+
+# Enrol this host's EK. Re-running updates the same TPM id.
+log_info "Enrolling the device TPM via ${SWTPM_UNIX_SOCK}"
+as_lab_user vault tpm enroll \
+  -name="${DEMO_DEVICE}" \
+  -tpm-device-path="${SWTPM_UNIX_SOCK}" \
+  -metadata=lab=tpm-lab
+tpm_id="$(as_lab_user vault tpm ek -tpm-device-path="${SWTPM_UNIX_SOCK}" -format=json | jq -r '.tpm_id // empty')"
+[[ -n "${tpm_id}" ]] || die "vault tpm ek returned no tpm_id"
+log_ok "TPM id ${tpm_id}"
+
+# Direct machine CLI role for Workflow 1.
+as_lab_user vault write auth/tpm/role/machine-cli \
+  tpm_ids="${tpm_id}" \
+  token_policies=device-read \
+  token_ttl=15m \
+  token_max_ttl=1h
+
+# Per-workload roles for Workflows 2 and 3.
+as_lab_user vault write auth/tpm/role/payments-app \
+  tpm_ids="${tpm_id}" \
+  token_policies=payments-read \
+  token_ttl=1h \
+  token_max_ttl=4h
+as_lab_user vault write auth/tpm/role/analytics-app \
+  tpm_ids="${tpm_id}" \
+  token_policies=analytics-read \
+  token_ttl=1h \
+  token_max_ttl=4h
+log_ok "auth/tpm roles machine-cli, payments-app and analytics-app bound to ${tpm_id}"
+
 # --- sentinel ---------------------------------------------------------------
 # Later scripts gate on this file: it records that Parts 4-5 completed against a
 # particular domain and CA, and survives nothing that Vault itself forgets.
@@ -214,6 +385,10 @@ jq -n \
   --arg ca_serial "${ca_serial}" \
   --arg ca_pem "${CA_PEM}" \
   --arg device "${DEMO_DEVICE}" \
+  --arg orch_policy "${ORCH_POLICY}" \
+  --arg orch_token_file "${ORCH_TOKEN_FILE}" \
+  --arg tpm_unix_sock "${SWTPM_UNIX_SOCK}" \
+  --arg tpm_id "${tpm_id}" \
   --arg configured_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   '{
      status: "complete",
@@ -223,8 +398,17 @@ jq -n \
      demo_device: $device,
      pki_role: "pki/roles/devices",
      cert_auth_role: "auth/cert/certs/tpm-devices",
+     payments_role: "auth/cert/certs/payments-app",
+     analytics_role: "auth/cert/certs/analytics-app",
+     tpm_auth_cli_role: "auth/tpm/role/machine-cli",
+     tpm_auth_payments_role: "auth/tpm/role/payments-app",
+     tpm_auth_analytics_role: "auth/tpm/role/analytics-app",
+     tpm_unix_sock: $tpm_unix_sock,
+     tpm_id: $tpm_id,
      approle_role: "auth/approle/role/device-enrol",
      enrol_policy: "device-enrol",
+     orchestrator_policy: $orch_policy,
+     orchestrator_token_file: $orch_token_file,
      configured_at: $configured_at
    }' | write_lab_file "${SENTINEL}"
 

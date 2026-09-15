@@ -26,7 +26,7 @@ source "${STAGE_DIR}/common.sh"
 #   3  an HTTP response came back but its body could not be parsed as JSON.
 #
 # Anything Vault said is printed on stderr before a non-zero exit, so the
-# negative-test scripts in Part 8 can show the operator *why* a login failed.
+# bonus negative-test scripts can show the operator *why* a login failed.
 # -----------------------------------------------------------------------------
 
 VAULT_HOSTPORT="${VAULT_HOSTPORT:-127.0.0.1:8200}"
@@ -222,6 +222,9 @@ require_cmd jq awk runuser || die "missing prerequisites"
 lab_mkdir "${LAB_DIR}" "${LAB_STATE_DIR}"
 
 say_step "Part 7: Vault login with the TPM-held key (role ${role})"
+say_detail "login method auth/cert (mTLS)"
+say_detail "cert role    ${role}"
+say_detail "key use      OpenSSL tpm2 provider → TPM"
 
 # --- build the openssl argument tail ----------------------------------------
 # Kept as an array so quoting survives the trip through as_lab_user.
@@ -345,6 +348,17 @@ run_cmd+=(bash "${HELPER}" "${VAULT_HOSTPORT}" "${role}" "${debug}" "${openssl_e
 err_file=''
 cleanup() { [[ -n "${err_file}" && -f "${err_file}" ]] && rm -f "${err_file}"; return 0; }
 trap cleanup EXIT
+
+if (( debug )); then
+  request_body="{\"name\":\"${role}\"}"
+  openssl_display="openssl s_client -ign_eof -provider default -provider tpm2 -connect ${VAULT_HOSTPORT} -CAfile ${LAB_TLS_DIR}/vault-ca.pem"
+  if (( ! no_cert )); then
+    openssl_display+=" -cert ${cert_path} -key ${key_path}"
+  fi
+  say_detail "equivalent login command:"
+  say_detail "  \$ printf 'POST /v1/auth/cert/login HTTP/1.1\\r\\nHost: ${VAULT_HOSTPORT}\\r\\nContent-Type: application/json\\r\\nContent-Length: ${#request_body}\\r\\nConnection: close\\r\\n\\r\\n${request_body}' \\"
+  say_detail "    | ${openssl_display}"
+fi
 
 say "Performing the mTLS handshake — the TPM signs the CertificateVerify, so this takes a moment..."
 if (( debug )); then

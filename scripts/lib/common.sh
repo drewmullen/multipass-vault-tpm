@@ -14,7 +14,11 @@ export LAB_USER LAB_DIR LAB_STATE_DIR LAB_TLS_DIR LAB_PKI_DIR
 # Software TPM ports. The attacker TPM stands in for a different machine.
 TPM_PORT="${TPM_PORT:-2321}"
 ATTACKER_TPM_PORT="${ATTACKER_TPM_PORT:-2331}"
-export TPM_PORT ATTACKER_TPM_PORT
+# Vault Enterprise TPM auth and vault agent speak a unix socket or char
+# device, not the TCP swtpm TCTI. scripts/10_tpm_unit.sh bridges the device
+# TPM's TCP port to this path.
+SWTPM_UNIX_SOCK="${SWTPM_UNIX_SOCK:-/run/swtpm/device.sock}"
+export TPM_PORT ATTACKER_TPM_PORT SWTPM_UNIX_SOCK
 
 # Scratch space.
 #
@@ -54,7 +58,7 @@ die()       { log_error "$*"; exit 1; }
 # Announce an automatic decision: what was detected and what follows from it.
 log_detected() { printf 'Detected %s — %s\n' "$1" "$2"; }
 
-# Print an expected-vs-actual pair. Used by the Part 8 negative demos, which
+# Print an expected-vs-actual pair. Used by the bonus negative demos, which
 # report rather than assert: the operator sees both halves and judges.
 report_expect() {
   printf '  %-10s %s\n' 'expect:' "$1"

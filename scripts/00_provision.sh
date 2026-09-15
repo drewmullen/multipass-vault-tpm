@@ -15,9 +15,6 @@ log_step "Part 1: install TPM tooling and Vault"
 # Non-interactive or dpkg will block on service-restart prompts under `multipass exec`.
 export DEBIAN_FRONTEND=noninteractive
 
-KEYRING="/usr/share/keyrings/hashicorp-archive-keyring.gpg"
-HASHICORP_LIST="/etc/apt/sources.list.d/hashicorp.list"
-
 # --- apt helpers -------------------------------------------------------------
 
 # `apt-get update` is the slow part of this script, so it runs at most once and
@@ -53,7 +50,7 @@ apt_install() {
 log_info "Checking base packages..."
 BASE_PACKAGES=(
   swtpm swtpm-tools tpm2-tools tpm2-openssl
-  jq tmux gpg wget lsb-release ca-certificates
+  jq tmux gpg wget unzip socat lsb-release ca-certificates
 )
 
 missing=()
@@ -87,61 +84,95 @@ else
   apt_install "${tcti_pkg}"
 fi
 
-# --- 1.2 Vault ---------------------------------------------------------------
+# --- 1.2 Vault Enterprise (TPM auth) -----------------------------------------
+#
+# This lab needs the Vault Enterprise TPM auth method and the matching Proxy
+# auto-auth. Those are not in the OSS apt package. Pin a release zip from
+# releases.hashicorp.com and install the binary at /usr/local/bin/vault so it
+# wins over any leftover /usr/bin/vault from an earlier apt install.
 
-log_step "HashiCorp apt repository"
+VAULT_VERSION="${VAULT_VERSION:-2.2.0-rc1+ent}"
+VAULT_INSTALL_DIR="/usr/local/bin"
+VAULT_BIN="${VAULT_INSTALL_DIR}/vault"
 
-# The source line is built from command substitutions. If one of these is
-# missing the heredoc below would silently write a malformed apt entry, so fail
-# loudly instead.
-require_cmd wget gpg lsb_release dpkg \
-  || die "the base package install did not provide the tools needed to add the HashiCorp repo"
+log_step "Vault Enterprise ${VAULT_VERSION}"
 
-repo_changed=0
-if [[ -s "${KEYRING}" ]]; then
-  log_detected "existing keyring at ${KEYRING}" "skipping the fetch and dearmor"
-else
-  log_info "Fetching and dearmoring the HashiCorp apt signing key..."
-  # Dearmor straight to the keyring; a partial file here would break every
-  # later apt run, so write via a temp file and move it into place.
-  tmp_key="$(mktemp)"
-  wget -qO- https://apt.releases.hashicorp.com/gpg | gpg --dearmor > "${tmp_key}"
-  install -m 0644 "${tmp_key}" "${KEYRING}"
-  rm -f "${tmp_key}"
-  repo_changed=1
-fi
+require_cmd wget unzip sha256sum dpkg \
+  || die "the base package install did not provide the tools needed to install Vault"
 
-if write_if_changed "${HASHICORP_LIST}" <<EOF
-deb [arch=$(dpkg --print-architecture) signed-by=${KEYRING}] https://apt.releases.hashicorp.com $(lsb_release -cs) main
-EOF
-then
-  log_info "Wrote ${HASHICORP_LIST}"
-  repo_changed=1
-else
-  log_detected "unchanged ${HASHICORP_LIST}" "no apt list rewrite needed"
-fi
+# Prefer the zip's linux_<arch> name. dpkg reports arm64; releases use arm64 too.
+arch="$(dpkg --print-architecture)"
+case "${arch}" in
+  amd64|arm64|386|ppc64le|s390x) ;;
+  *) die "no Vault Enterprise zip for architecture '${arch}'" ;;
+esac
 
-# A new key or a rewritten source line means the cached lists predate the repo.
-# apt_update_once is a no-op after the base install has already refreshed, so
-# clear the flag first — otherwise the HashiCorp index is never fetched and
-# `apt-get install vault` fails with "Unable to locate package".
-if (( repo_changed )); then
-  APT_UPDATED=0
-  apt_update_once
-fi
+vault_zip="vault_${VAULT_VERSION}_linux_${arch}.zip"
+vault_base_url="https://releases.hashicorp.com/vault/${VAULT_VERSION}"
+vault_zip_url="${vault_base_url}/${vault_zip}"
+vault_sums_url="${vault_base_url}/vault_${VAULT_VERSION}_SHA256SUMS"
 
-if pkg_installed vault; then
-  log_detected "existing vault package" "skipping the install"
-else
-  # Guard against a stale index from any earlier run: if apt cannot see the
-  # package at all, refresh unconditionally before giving up on it.
-  if ! apt-cache show vault >/dev/null 2>&1; then
-    log_detected "vault absent from the apt index" "refreshing package lists"
-    APT_UPDATED=0
+need_vault_install=1
+if [[ -x "${VAULT_BIN}" ]]; then
+  installed="$(${VAULT_BIN} version 2>/dev/null || true)"
+  # vault version prints "Vault v2.2.0-rc1+ent (...)" — match the version token.
+  if printf '%s' "${installed}" | grep -Fq "v${VAULT_VERSION}"; then
+    need_vault_install=0
+    log_detected "Vault ${VAULT_VERSION} already at ${VAULT_BIN}" "skipping download"
+  else
+    log_detected "a different Vault at ${VAULT_BIN}" "${installed:-unknown} — replacing it"
   fi
-  apt_update_once
-  apt_install vault
 fi
+
+if (( need_vault_install == 1 )); then
+  # Stop anything still holding the old binary before we overwrite it.
+  systemctl stop vault-dev vault-proxy@payments vault-proxy@analytics \
+    vault.service 2>/dev/null || true
+
+  work="$(mktemp -d)"
+  cleanup_vault_work() { rm -rf "${work}"; }
+  trap cleanup_vault_work EXIT
+
+  log_info "Downloading ${vault_zip_url}"
+  wget -q -O "${work}/${vault_zip}" "${vault_zip_url}"
+  wget -q -O "${work}/SHA256SUMS" "${vault_sums_url}"
+
+  log_info "Verifying SHA-256"
+  (
+    cd "${work}"
+    grep -F " ${vault_zip}" SHA256SUMS | sha256sum -c -
+  )
+
+  log_info "Installing vault to ${VAULT_BIN}"
+  unzip -qo "${work}/${vault_zip}" -d "${work}"
+  install -m 0755 "${work}/vault" "${VAULT_BIN}"
+
+  # An apt-installed vault at /usr/bin/vault would otherwise shadow this one
+  # when PATH puts /usr/bin first. Remove the packages; the binary we want is
+  # the one under /usr/local/bin.
+  if pkg_installed vault || pkg_installed vault-enterprise; then
+    log_detected "apt vault package(s)" "removing so ${VAULT_BIN} is the only vault"
+    apt-get remove -y -qq vault vault-enterprise 2>/dev/null || true
+  fi
+
+  cleanup_vault_work
+  trap - EXIT
+fi
+
+# Ensure /usr/local/bin is ahead of /usr/bin for non-login shells that
+# multipass and systemd ExecStart use. The unit files call /usr/bin/vault
+# today; point them at the Enterprise binary via a symlink if needed.
+if [[ ! -e /usr/bin/vault ]] || [[ "$(readlink -f /usr/bin/vault 2>/dev/null || true)" != "$(readlink -f "${VAULT_BIN}")" ]]; then
+  if [[ -e /usr/bin/vault && ! -L /usr/bin/vault ]]; then
+    log_warn "/usr/bin/vault is a real file, not a symlink — leaving it; units use ${VAULT_BIN}"
+  else
+    ln -sfn "${VAULT_BIN}" /usr/bin/vault
+    log_ok "/usr/bin/vault -> ${VAULT_BIN}"
+  fi
+fi
+
+[[ -x "${VAULT_BIN}" ]] || die "Vault binary missing at ${VAULT_BIN} after install"
+log_ok "$(${VAULT_BIN} version)"
 
 # --- 1.3 Lab directory and environment file ----------------------------------
 

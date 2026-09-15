@@ -58,6 +58,10 @@ first_line() { printf '%s\n' "$1" | grep -m1 -v '^[[:space:]]*$' || printf '(no 
 # --- 1. who is this token? ---------------------------------------------------
 log_info ""
 log_info "1. Look the token up — who does Vault think we are?"
+log_info "   In this first demo, the script explicitly supplies the token minted in Part 7"
+log_info "   through VAULT_TOKEN. It is not embedded in the source, but the workload is"
+log_info "   responsible for handling it. The primary proxy workflows use Vault Agent to"
+log_info "   authenticates, renews, and applies the workload's token automatically."
 log_detail "   VAULT_TOKEN=<device> vault token lookup"
 
 rc=0

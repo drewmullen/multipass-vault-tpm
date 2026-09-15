@@ -16,7 +16,9 @@ source "${STAGE_DIR}/common.sh"
 log_step "Resetting lab state"
 
 log_info "Stopping lab services..."
-systemctl stop vault-dev swtpm@device swtpm@attacker 2>/dev/null || true
+systemctl stop vault-dev swtpm@device swtpm@attacker swtpm-unix-bridge \
+  vault-proxy-single vault-proxy@payments vault-proxy@analytics 2>/dev/null || true
+rm -rf /var/lib/vault-agent /run/vault-proxy /run/swtpm 2>/dev/null || true
 log_ok "services stopped"
 
 # Vault dev mode is in-memory, so stopping the unit has already discarded every
