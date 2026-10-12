@@ -313,7 +313,8 @@ tasks:
       - for: [topology, enrolment]
         cmd: dot -Tpng -Gdpi=144 -o docs/diagrams/{{.ITEM}}.png docs/diagrams/{{.ITEM}}.dot
       - rsvg-convert --zoom 1.5 -o docs/diagrams/proxy-boundary.png docs/diagrams/proxy-boundary.svg
-      - echo "Rendered docs/diagrams/{topology,enrolment,proxy-boundary}.png"
+      - rsvg-convert --zoom 1.5 -o docs/diagrams/tpm-auth-overview.png docs/diagrams/tpm-auth-overview.svg
+      - echo "Rendered docs/diagrams/{topology,enrolment,proxy-boundary,tpm-auth-overview}.png"
     sources:
       - docs/diagrams/*.dot
       - docs/diagrams/*.svg

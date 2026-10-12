@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 120 1600 1000" role="img" aria-labelledby="title desc" font-family="'Helvetica Neue', Helvetica, Arial, 'DejaVu Sans', sans-serif">
+  <title id="title">TPM authentication with Vault</title>
+  <desc id="desc">The Vault client communicates with Vault over the network and with the TPM locally. During attestation the client answers a Vault challenge using a TPM-protected key and receives a certificate. During login the TPM signs for the client, Vault validates the proof, and Vault returns a short-lived token. The TPM never calls Vault directly.</desc>
+  <defs>
+    <filter id="shadow" x="-8%" y="-8%" width="116%" height="124%">
+      <feDropShadow dx="0" dy="4" stdDeviation="7" flood-color="#0F172A" flood-opacity="0.10"/>
+    </filter>
+    <marker id="arrow-blue" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="9" markerHeight="9" orient="auto">
+      <path d="M1 1L11 6L1 11z" fill="#2563EB"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="9" markerHeight="9" orient="auto">
+      <path d="M1 1L11 6L1 11z" fill="#16A34A"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="9" markerHeight="9" orient="auto">
+      <path d="M1 1L11 6L1 11z" fill="#7C3AED"/>
+    </marker>
+  </defs>
+
+  <rect width="1600" height="1120" fill="#F8FAFC"/>
+  <!-- Participants -->
+  <rect x="120" y="145" width="330" height="115" rx="22" fill="#FFFFFF" stroke="#2563EB" stroke-width="2.5" filter="url(#shadow)"/>
+  <circle cx="180" cy="202" r="31" fill="#DBEAFE" stroke="#2563EB" stroke-width="2"/>
+  <rect x="164" y="191" width="32" height="24" rx="4" fill="#2563EB"/>
+  <path d="M171 191v-8a9 9 0 0 1 18 0v8" fill="none" stroke="#2563EB" stroke-width="4.5" stroke-linecap="round"/>
+  <text x="230" y="194" font-size="25" font-weight="700" fill="#0F172A">Vault client</text>
+  <text x="230" y="225" font-size="16" fill="#475569">CLI, Agent, or application</text>
+
+  <rect x="635" y="145" width="330" height="115" rx="22" fill="#FFFFFF" stroke="#16A34A" stroke-width="2.5" filter="url(#shadow)"/>
+  <rect x="687" y="174" width="60" height="55" rx="7" fill="#DCFCE7" stroke="#16A34A" stroke-width="2.5"/>
+  <path d="M674 186h13M674 202h13M674 218h13M747 186h13M747 202h13M747 218h13" stroke="#16A34A" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="717" cy="201" r="10" fill="#16A34A"/>
+  <text x="785" y="194" font-size="25" font-weight="700" fill="#0F172A">Local TPM</text>
+  <text x="785" y="225" font-size="16" fill="#16A34A">Protected key stays here</text>
+
+  <rect x="1150" y="145" width="330" height="115" rx="22" fill="#FFFFFF" stroke="#7C3AED" stroke-width="2.5" filter="url(#shadow)"/>
+  <path d="M1207 172l34 13v27c0 25-16 41-34 50-19-9-35-25-35-50v-27z" fill="#EDE9FE" stroke="#7C3AED" stroke-width="2.5"/>
+  <path d="M1191 212l11 11 22-26" fill="none" stroke="#7C3AED" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="1270" y="194" font-size="25" font-weight="700" fill="#0F172A">Vault</text>
+  <text x="1270" y="225" font-size="16" fill="#475569">TPM auth method</text>
+
+  <!-- Lifelines -->
+  <path d="M285 260V1000" stroke="#93C5FD" stroke-width="2" stroke-dasharray="8 9"/>
+  <path d="M800 260V1000" stroke="#86EFAC" stroke-width="2" stroke-dasharray="8 9"/>
+  <path d="M1315 260V1000" stroke="#C4B5FD" stroke-width="2" stroke-dasharray="8 9"/>
+
+  <!-- Phase 1 -->
+  <rect x="65" y="300" width="1470" height="48" rx="14" fill="#EEF2FF"/>
+  <text x="92" y="331" font-size="17" font-weight="700" fill="#4338CA">ONBOARD VM - ATTEST THE TPM AND ACQUIRE LOGIN MATERIAL</text>
+
+  <path d="M300 395H1300" stroke="#2563EB" stroke-width="2.5" marker-end="url(#arrow-blue)"/>
+  <circle cx="285" cy="395" r="17" fill="#2563EB"/>
+  <text x="285" y="401" font-size="14" font-weight="700" text-anchor="middle" fill="#FFFFFF">1</text>
+  <text x="800" y="384" font-size="17" font-weight="700" text-anchor="middle" fill="#1E3A8A">Begin attestation</text>
+
+  <path d="M1300 460H300" stroke="#7C3AED" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
+  <circle cx="1315" cy="460" r="17" fill="#7C3AED"/>
+  <text x="1315" y="466" font-size="14" font-weight="700" text-anchor="middle" fill="#FFFFFF">2</text>
+  <text x="800" y="449" font-size="17" font-weight="700" text-anchor="middle" fill="#5B21B6">Attestation challenge</text>
+
+  <path d="M300 525H785" stroke="#16A34A" stroke-width="2.5" marker-end="url(#arrow-green)"/>
+  <circle cx="285" cy="525" r="17" fill="#16A34A"/>
+  <text x="285" y="531" font-size="14" font-weight="700" text-anchor="middle" fill="#FFFFFF">3</text>
+  <text x="545" y="514" font-size="17" font-weight="700" text-anchor="middle" fill="#166534">Create protected key and answer challenge</text>
+
+  <path d="M785 590H300" stroke="#16A34A" stroke-width="2.5" marker-end="url(#arrow-green)"/>
+  <circle cx="800" cy="590" r="17" fill="#16A34A"/>
+  <text x="800" y="596" font-size="14" font-weight="700" text-anchor="middle" fill="#FFFFFF">4</text>
+  <text x="545" y="579" font-size="17" font-weight="700" text-anchor="middle" fill="#166534">Attestation proof (private key stays in TPM)</text>
+
+  <path d="M300 655H1300" stroke="#2563EB" stroke-width="2.5" marker-end="url(#arrow-blue)"/>
+  <circle cx="285" cy="655" r="17" fill="#2563EB"/>
+  <text x="285" y="661" font-size="14" font-weight="700" text-anchor="middle" fill="#FFFFFF">5</text>
+  <text x="800" y="644" font-size="17" font-weight="700" text-anchor="middle" fill="#1E3A8A">Complete attestation with proof</text>
+
+  <path d="M1300 720H300" stroke="#7C3AED" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
+  <circle cx="1315" cy="720" r="17" fill="#7C3AED"/>
+  <text x="1315" y="726" font-size="14" font-weight="700" text-anchor="middle" fill="#FFFFFF">6</text>
+  <text x="800" y="709" font-size="17" font-weight="700" text-anchor="middle" fill="#5B21B6">TPM-backed client certificate</text>
+
+  <!-- Phase 2 -->
+  <rect x="65" y="765" width="1470" height="48" rx="14" fill="#F5F3FF"/>
+  <text x="92" y="796" font-size="17" font-weight="700" fill="#6D28D9">LOG IN</text>
+
+  <path d="M300 860H785" stroke="#16A34A" stroke-width="2.5" marker-end="url(#arrow-green)"/>
+  <path d="M785 890H300" stroke="#16A34A" stroke-width="2.5" marker-end="url(#arrow-green)"/>
+  <circle cx="285" cy="875" r="17" fill="#16A34A"/>
+  <text x="285" y="881" font-size="14" font-weight="700" text-anchor="middle" fill="#FFFFFF">7</text>
+  <text x="545" y="849" font-size="17" font-weight="700" text-anchor="middle" fill="#166534">Ask TPM to sign</text>
+  <text x="545" y="921" font-size="15" text-anchor="middle" fill="#166534">Signature returns; key does not</text>
+
+  <path d="M300 950H1300" stroke="#2563EB" stroke-width="2.5" marker-end="url(#arrow-blue)"/>
+  <circle cx="285" cy="950" r="17" fill="#2563EB"/>
+  <text x="285" y="956" font-size="14" font-weight="700" text-anchor="middle" fill="#FFFFFF">8</text>
+  <text x="800" y="939" font-size="17" font-weight="700" text-anchor="middle" fill="#1E3A8A">TPM-backed login</text>
+
+  <path d="M1300 1015H300" stroke="#7C3AED" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
+  <circle cx="1315" cy="1015" r="17" fill="#7C3AED"/>
+  <text x="1315" y="1021" font-size="14" font-weight="700" text-anchor="middle" fill="#FFFFFF">9</text>
+  <text x="800" y="1004" font-size="17" font-weight="700" text-anchor="middle" fill="#5B21B6">Short-lived Vault token</text>
+
+  <rect x="310" y="1060" width="980" height="44" rx="14" fill="#F0FDF4" stroke="#86EFAC" stroke-width="1.5"/>
+  <text x="800" y="1088" font-size="18" font-weight="700" text-anchor="middle" fill="#166534">Only the client talks to Vault. The protected private key never leaves the TPM.</text>
+</svg>
