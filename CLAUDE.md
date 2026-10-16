@@ -44,6 +44,7 @@ Run `task --list` for the authoritative version. Grouped by purpose:
 | Task | Purpose |
 |---|---|
 | `all` | launch → provision → tpm → vault → config → enrol |
+| `demo:prepare` (`provision-demo`) | launch → provision → tpm → vault; stop before configuration and enrolment for a live demo |
 | `provision` | Part 1: install TPM tooling and Vault in the VM |
 | `tpm` | Part 2: start both software TPMs as systemd units |
 | `vault` | Part 3: start the Vault dev server (TLS) as a systemd unit |
@@ -58,6 +59,7 @@ Run `task --list` for the authoritative version. Grouped by purpose:
 | `demo:nonexportable` | The key file is a TPM-wrapped blob, not a private key |
 | `demo:cli` | Workflow 1: native `vault login -method=tpm` from the machine |
 | `proxy` / `demo:proxy` | Workflow 2: one workload uses localhost HTTP while Agent manages its token |
+| `proxy:socket` | One payments Agent on an owner-only Unix socket (`/run/vault-proxy/payments.sock`) |
 | `proxies` / `demo:multi-app` | Workflow 3: per-app agents on owner-only Unix sockets |
 | `demo:bonus` | Original generic cert-auth walkthrough and its limitations |
 | `demo:login` | Bonus: mTLS cert-auth login with the TPM-held OpenSSL key |

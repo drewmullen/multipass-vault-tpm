@@ -362,6 +362,7 @@ one.
 | `task demo:nonexportable` | Shows the TSS2 header and the public-key-only extraction | The talking point that lands hardest |
 | `task demo:cli` | Runs visible `vault tpm attest` and `vault login -method=tpm` commands | A `machine-cli` token reads the device secret |
 | `task proxy`, `task demo:proxy` | Starts one Agent on localhost HTTP and sends ordinary Vault requests through it | Own secret succeeds without workload token handling; supplied root token cannot widen access |
+| `task proxy:socket` | Creates the `payments` user and starts one Agent on `/run/vault-proxy/payments.sock` | Socket is mode `0600`, owned by `payments`; the agent logs in as `machine-cli` |
 | `task proxies`, `task demo:multi-app` | Starts payments and analytics agents on owner-only Unix sockets | Own access succeeds; cross-socket and cross-secret access fail |
 | `task demo` | Foundation plus all three primary workflows | A few minutes; TPM certificate acquisition is rate-limited per EK |
 | `task demo:bonus` | Original generic cert-auth login, manual token, negatives and shared-host gap | Optional implementation detail and limitation walkthrough |

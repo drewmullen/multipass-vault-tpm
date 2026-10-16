@@ -1,49 +1,15 @@
 # Vault TPM Authentication Lab
 
-A self-contained Vault Enterprise lab showing three progressively stronger TPM-backed
-workflows:
-
-1. A machine logs in directly with `vault login -method=tpm`.
-2. One workload uses a normal localhost URL while Vault Agent performs TPM
-   authentication and manages its token.
-3. Payments and analytics workloads use separate, owner-only Unix sockets, fixed roles
-   and TPM-backed application keys.
-
-The original generic `auth/cert` flow remains available as `task demo:bonus`. It shows
-an OpenSSL client using a TPM-held TLS key, manual token handling, negative tests and
-the reason one shared device certificate cannot isolate local applications.
-
-![Two application workloads using role-fixed Vault Agent proxies and one shared TPM](docs/diagrams/proxy-boundary.png)
-
-## Demo workflows
-
-### 1. Direct machine login
-
-`task demo:cli` prints and runs native `vault tpm attest` and
-`vault login -method=tpm` commands. The CLI receives a `device-read` token, reads the
-device secret and revokes the demonstration token.
-
-### 2. One workload through a standard URL
-
-`task demo:proxy` starts Vault Agent at `http://127.0.0.1:8100`. The application sends
-ordinary Vault requests while Agent performs TPM authentication, renewal and token
-injection. This workflow demonstrates token automation, not local process isolation.
-
-### 3. Multiple isolated workloads
-
-`task demo:multi-app` gives payments and analytics separate role-fixed agents and
-owner-only Unix sockets. Each application reads its own secret; cross-socket access,
-cross-secret access and caller-supplied broader tokens are rejected.
-
-See [`docs/demo-output.txt`](docs/demo-output.txt) for a complete captured run without
-setting up the VM.
+A Vault Enterprise lab on an Ubuntu VM. You configure TPM auth yourself, log in
+with a TPM-backed application key, then put one workload behind an owner-only
+Unix socket whose agent logs in as that same role.
 
 ## Prerequisites
 
 Everything runs on a macOS host driving an Ubuntu 24.04 VM via Multipass.
 
 Vault TPM authentication requires Vault Enterprise `2.2.0-rc1+ent`. Put the Enterprise
-licence at `.vault-license` before running `task all`.
+licence at `.vault-license` before `task provision-demo`.
 
 | Tool | Why |
 |---|---|
@@ -59,19 +25,123 @@ brew install --cask multipass
 brew install go-task jq graphviz librsvg shellcheck gitleaks pre-commit
 ```
 
-## Quick start
+## Walkthrough
+
+`task provision-demo` launches the VM, installs the TPM tooling and Vault, and
+starts the software TPM and the Vault dev server. It does not enable auth
+methods, write policies, or enrol a device.
+
+Commands marked **on device** have to run where the TPM is. In this lab that is
+the VM. Commands marked **anywhere** only talk to Vault.
+
+### Prepare the VM
+
+On the host:
 
 ```bash
-task deps    # verify host tooling
-task init    # one-time project setup (pre-commit hooks, .env)
-task all     # launch the VM, provision it, start the TPMs and Vault, enrol node01
-task demo    # direct CLI → HTTP proxy → isolated multi-app proxies
-task demo:bonus # optional generic cert-auth walkthrough and negative tests
+task provision-demo
+task shell
 ```
 
-`task all` takes a few minutes on first run; each of its steps is idempotent and
-individually re-runnable. The multi-app workflow pauses between TPM attestations because
-the TPM auth backend rate-limits certificate acquisition per endorsement key.
+In the VM:
+
+```bash
+source ~/lab/env.sh
+```
+
+`~/lab/env.sh` sets `VAULT_ADDR`, `VAULT_CACERT`, and `VAULT_TOKEN=root`.
+
+### Secret and policy
+
+```bash
+vault kv put secret/devices/node01 \
+  message="hello from vault, attested by TPM key"
+
+vault policy write device-read - <<'EOF'
+path "secret/data/devices/*" {
+  capabilities = ["read"]
+}
+EOF
+```
+
+### Enable TPM auth and enrol this TPM
+
+Anywhere — enable the method:
+
+```bash
+vault auth enable tpm
+vault write auth/tpm/config default_cert_ttl=2160h
+```
+
+On device — enrol the endorsement key:
+
+```bash
+vault tpm enroll \
+  -name=node01 \
+  -tpm-device-path=/run/swtpm/device.sock \
+  -metadata=lab=tpm-lab
+
+tpm_id=$(vault tpm ek -tpm-device-path=/run/swtpm/device.sock -format=json | jq -r .tpm_id)
+```
+
+Anywhere — bind a role to that TPM id:
+
+```bash
+vault write auth/tpm/role/machine-cli \
+  tpm_ids="$tpm_id" \
+  token_policies=device-read \
+  token_ttl=15m \
+  token_max_ttl=1h
+```
+
+### Attest and log in
+
+On device. Attest creates the application key for this role. `unset` drops the
+root token from the shell so the login is the TPM method.
+
+```bash
+unset VAULT_TOKEN
+mkdir -p ~/lab/cli-tpm
+
+vault tpm attest \
+  -role-name=machine-cli \
+  -tpm-device-path=/run/swtpm/device.sock \
+  -tpm-state-dir="$HOME/lab/cli-tpm" \
+  -cert-subject-CN=node01.devices.lab.local
+
+vault login -method=tpm -no-store \
+  -tpm-state-dir="$HOME/lab/cli-tpm" \
+  -tpm-device-path=/run/swtpm/device.sock \
+  role_name=machine-cli
+
+token=$(env -u VAULT_TOKEN vault login -method=tpm -no-store -field=token \
+  -tpm-state-dir="$HOME/lab/cli-tpm" \
+  -tpm-device-path=/run/swtpm/device.sock \
+  role_name=machine-cli)
+
+VAULT_TOKEN="$token" vault kv get secret/devices/node01
+```
+
+### Socket proxy
+
+Leave the VM shell. On the host, `task proxy:socket` creates the `payments`
+user and starts one Vault Agent on `/run/vault-proxy/payments.sock`. The agent
+attests as `machine-cli` and forces that token onto the socket.
+
+```bash
+task proxy:socket
+task shell
+```
+
+In the VM, the workload does not use a Vault token of its own. Only `payments`
+can open the socket:
+
+```bash
+echo $VAULT_TOKEN
+sudo -u payments env \
+  VAULT_ADDR=unix:///run/vault-proxy/payments.sock \
+  vault kv get secret/devices/node01
+```
 
 ## All tasks
 
@@ -79,14 +149,11 @@ the TPM auth backend rate-limits certificate acquisition per endorsement key.
 task --list
 ```
 
-That is the authoritative catalogue — build steps, individual demo segments,
-`task shell`, and `task logs:tpm` / `task logs:vault` for the core services.
+That is the authoritative catalogue. `task shell` opens the VM.
+`task logs:tpm` and `task logs:vault` follow the software TPM and Vault journals.
 
-## Documentation
-
-[`docs/architecture.md`](docs/architecture.md) covers the topology, the enrolment and
-login trust chain, what the TPM does and does not guarantee, a task-by-task walkthrough,
-troubleshooting, and how the lab maps onto a production deployment.
+[`docs/architecture.md`](docs/architecture.md) covers the topology, what the TPM
+does and does not guarantee, and how the lab maps onto a production deployment.
 
 ## Reset and cleanup
 

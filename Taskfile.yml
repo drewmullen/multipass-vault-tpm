@@ -128,6 +128,17 @@ tasks:
       - echo ""
       - echo "Lab ready. Run 'task demo' for the full walkthrough."
 
+  demo:prepare:
+    aliases: [provision-demo]
+    desc: Prepare the VM, TPMs and Vault for a manual configuration demo
+    cmds:
+      - task: launch
+      - task: provision
+      - task: tpm
+      - task: vault
+      - echo ""
+      - echo "Demo infrastructure ready. Configure and enrol manually from Part 4."
+
   provision:
     desc: 'Part 1: install TPM tooling and Vault in the VM'
     cmds:
@@ -191,6 +202,12 @@ tasks:
     cmds:
       - task: _run
         vars: {SCRIPT: 81_single_proxy.sh, ARGS: '{{.DEVICE_NAME}} {{.DOMAIN}}'}
+
+  proxy:socket:
+    desc: 'Start one TPM-authenticated Agent on an owner-only Unix socket'
+    cmds:
+      - task: _run
+        vars: {SCRIPT: 81_single_socket.sh, ARGS: '{{.DEVICE_NAME}} {{.DOMAIN}}'}
 
   demo:proxy:
     desc: 'Workflow 2: workload uses a normal URL while Agent manages its token'
