@@ -1,0 +1,151 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1940" height="1080" viewBox="0 0 1940 1080" role="img" aria-labelledby="title desc" font-family="'Helvetica Neue', Helvetica, Arial, 'DejaVu Sans', sans-serif">
+<title id="title">Single-application Vault TPM authentication walkthrough</title>
+<desc id="desc">A payments application calls its owner-only Vault Agent socket. The agent logs in to a fixed Vault TPM role using a non-exportable key in the VM TPM. Vault verifies the enrolled TPM identity and returns a payments-scoped token, which the agent forces on the request before Vault permits access to the payments secret.</desc>
+<defs>
+  <filter id="shadow" x="-8%" y="-8%" width="116%" height="124%"><feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#0F172A" flood-opacity="0.12"/></filter>
+  <marker id="green-arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="9" markerHeight="9" orient="auto"><path d="M1 1L11 6L1 11z" fill="#16A34A"/></marker>
+  <marker id="slate-arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="9" markerHeight="9" orient="auto"><path d="M1 1L11 6L1 11z" fill="#64748B"/></marker>
+  <marker id="amber-arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="9" markerHeight="9" orient="auto"><path d="M1 1L11 6L1 11z" fill="#D97706"/></marker>
+</defs>
+
+<rect width="1940" height="1080" fill="#F5F7FB"/>
+<text x="40" y="58" font-size="34" font-weight="700" fill="#0F172A">One application, one TPM-backed Vault identity</text>
+<text x="40" y="92" font-size="18" fill="#475569">Demo path: the application uses a local proxy; Vault Agent handles TPM authentication and forces the role-scoped token.</text>
+
+<!-- Trust boundaries -->
+<rect x="30" y="125" width="1180" height="620" rx="28" fill="#EFF6FF" stroke="#2563EB" stroke-width="2"/>
+<text x="58" y="160" font-size="14" font-weight="700" fill="#2563EB" letter-spacing="1.5">TPM-ENABLED LINUX VM</text>
+<rect x="1240" y="125" width="670" height="620" rx="28" fill="#F8FAFC" stroke="#94A3B8" stroke-width="2"/>
+<text x="1268" y="160" font-size="14" font-weight="700" fill="#475569" letter-spacing="1.5">VAULT ENTERPRISE</text>
+
+<!-- Column headings -->
+<text x="180" y="205" font-size="14" font-weight="700" fill="#64748B" text-anchor="middle" letter-spacing="1.2">APPLICATION</text>
+<text x="550" y="205" font-size="14" font-weight="700" fill="#64748B" text-anchor="middle" letter-spacing="1.2">LOCAL PROXY</text>
+<text x="970" y="205" font-size="14" font-weight="700" fill="#64748B" text-anchor="middle" letter-spacing="1.2">VM TPM 2.0</text>
+<text x="1440" y="205" font-size="14" font-weight="700" fill="#64748B" text-anchor="middle" letter-spacing="1.2">TPM AUTH</text>
+<text x="1760" y="205" font-size="14" font-weight="700" fill="#64748B" text-anchor="middle" letter-spacing="1.2">SECRET</text>
+
+<!-- Application -->
+<rect x="70" y="250" width="220" height="270" rx="22" fill="#FFFFFF" stroke="#2563EB" stroke-width="2.5" filter="url(#shadow)"/>
+<rect x="112" y="286" width="136" height="90" rx="16" fill="#DBEAFE" stroke="#2563EB" stroke-width="2"/>
+<rect x="132" y="307" width="96" height="48" rx="7" fill="#2563EB"/>
+<circle cx="150" cy="331" r="6" fill="#DBEAFE"/>
+<circle cx="170" cy="331" r="6" fill="#DBEAFE"/>
+<path d="M190 331h20" stroke="#DBEAFE" stroke-width="5" stroke-linecap="round"/>
+<text x="180" y="414" font-size="21" font-weight="700" fill="#0F172A" text-anchor="middle">Payments App</text>
+<text x="180" y="444" font-size="14" fill="#475569" text-anchor="middle" font-family="Menlo, Consolas, 'DejaVu Sans Mono', monospace">runs as uid payments</text>
+<text x="180" y="478" font-size="14" fill="#64748B" text-anchor="middle">No Vault token or TPM</text>
+<text x="180" y="500" font-size="14" fill="#64748B" text-anchor="middle">commands in application code</text>
+
+<!-- Vault Agent -->
+<rect x="370" y="230" width="360" height="330" rx="22" fill="#FFFFFF" stroke="#2563EB" stroke-width="2.5" filter="url(#shadow)"/>
+<path d="M370 252a22 22 0 0 1 22-22h316a22 22 0 0 1 22 22v54H370z" fill="#DBEAFE"/>
+<text x="395" y="267" font-size="21" font-weight="700" fill="#0F172A">Vault Agent - API proxy</text>
+<text x="395" y="292" font-size="14" fill="#475569">dedicated to the Payments application</text>
+<text x="395" y="342" font-size="12" font-weight="700" fill="#64748B" letter-spacing="1">SOCKET</text>
+<text x="500" y="342" font-size="15" fill="#0F172A" font-family="Menlo, Consolas, 'DejaVu Sans Mono', monospace">payments.sock</text>
+<text x="395" y="380" font-size="12" font-weight="700" fill="#64748B" letter-spacing="1">ACCESS</text>
+<text x="500" y="380" font-size="15" fill="#0F172A" font-family="Menlo, Consolas, 'DejaVu Sans Mono', monospace">0600 - payments</text>
+<text x="395" y="418" font-size="12" font-weight="700" fill="#64748B" letter-spacing="1">AUTH</text>
+<text x="500" y="418" font-size="15" fill="#0F172A" font-family="Menlo, Consolas, 'DejaVu Sans Mono', monospace">method "tpm"</text>
+<text x="395" y="456" font-size="12" font-weight="700" fill="#64748B" letter-spacing="1">FIXED ROLE</text>
+<text x="500" y="456" font-size="15" font-weight="700" fill="#2563EB" font-family="Menlo, Consolas, 'DejaVu Sans Mono', monospace">payments-app</text>
+<rect x="395" y="485" width="310" height="48" rx="12" fill="#FEF3C7" stroke="#B45309" stroke-width="1.5"/>
+<text x="550" y="515" font-size="15" font-weight="700" fill="#92400E" text-anchor="middle" font-family="Menlo, Consolas, 'DejaVu Sans Mono', monospace">use_auto_auth_token = force</text>
+
+<!-- TPM -->
+<rect x="820" y="230" width="300" height="430" rx="22" fill="#FFFFFF" stroke="#334155" stroke-width="2.5" filter="url(#shadow)"/>
+<path d="M820 252a22 22 0 0 1 22-22h256a22 22 0 0 1 22 22v54H820z" fill="#1E293B"/>
+<text x="970" y="268" font-size="21" font-weight="700" fill="#FFFFFF" text-anchor="middle">TPM 2.0</text>
+<text x="970" y="292" font-size="14" fill="#CBD5E1" text-anchor="middle">/dev/tpmrm0</text>
+<rect x="850" y="338" width="240" height="112" rx="16" fill="#DBEAFE" stroke="#2563EB" stroke-width="2"/>
+<circle cx="887" cy="394" r="14" fill="none" stroke="#2563EB" stroke-width="4"/>
+<path d="M901 394h30m-9 0v10m-10-10v8" fill="none" stroke="#2563EB" stroke-width="4" stroke-linecap="round"/>
+<text x="946" y="385" font-size="18" font-weight="700" fill="#0F172A">Application key</text>
+<text x="946" y="412" font-size="14" fill="#475569">signs inside TPM</text>
+<text x="946" y="434" font-size="13" fill="#64748B">non-exportable</text>
+<rect x="850" y="486" width="240" height="112" rx="16" fill="#FFFBEB" stroke="#D97706" stroke-width="2"/>
+<text x="970" y="526" font-size="18" font-weight="700" fill="#92400E" text-anchor="middle">Endorsement Key</text>
+<text x="970" y="553" font-size="14" fill="#92400E" text-anchor="middle">one enrolled VM identity</text>
+<text x="970" y="577" font-size="13" fill="#B45309" text-anchor="middle">public half registered once</text>
+<text x="970" y="634" font-size="13" fill="#64748B" text-anchor="middle">Private keys never leave the TPM.</text>
+
+<!-- Vault auth -->
+<rect x="1275" y="230" width="330" height="430" rx="22" fill="#FFFFFF" stroke="#2563EB" stroke-width="2.5" filter="url(#shadow)"/>
+<path d="M1275 252a22 22 0 0 1 22-22h286a22 22 0 0 1 22 22v54H1275z" fill="#1E293B"/>
+<text x="1440" y="268" font-size="21" font-weight="700" fill="#FFFFFF" text-anchor="middle">Vault - auth/tpm</text>
+<text x="1440" y="292" font-size="14" fill="#CBD5E1" text-anchor="middle">verifies TPM identity and role</text>
+<text x="1305" y="348" font-size="12" font-weight="700" fill="#64748B" letter-spacing="1">ENROLLED TPM</text>
+<text x="1305" y="375" font-size="15" fill="#0F172A" font-family="Menlo, Consolas, 'DejaVu Sans Mono', monospace">identity/tpm - VM EK</text>
+<text x="1305" y="421" font-size="12" font-weight="700" fill="#64748B" letter-spacing="1">ROLE</text>
+<text x="1305" y="450" font-size="19" font-weight="700" fill="#2563EB" font-family="Menlo, Consolas, 'DejaVu Sans Mono', monospace">payments-app</text>
+<path d="M1440 468v25m-8-8l8 8l8-8" fill="none" stroke="#64748B" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="1305" y="531" font-size="12" font-weight="700" fill="#64748B" letter-spacing="1">TOKEN POLICY</text>
+<text x="1305" y="560" font-size="19" font-weight="700" fill="#2563EB" font-family="Menlo, Consolas, 'DejaVu Sans Mono', monospace">payments-read</text>
+<text x="1305" y="594" font-size="14" fill="#475569" font-family="Menlo, Consolas, 'DejaVu Sans Mono', monospace">read secret/payments/*</text>
+<rect x="1305" y="615" width="270" height="28" rx="9" fill="#DCFCE7" stroke="#16A34A"/>
+<text x="1440" y="635" font-size="13" font-weight="700" fill="#166534" text-anchor="middle">scoped, renewable token</text>
+
+<!-- Secret -->
+<rect x="1640" y="312" width="240" height="180" rx="20" fill="#FFFFFF" stroke="#16A34A" stroke-width="2.5" filter="url(#shadow)"/>
+<path d="M1640 334a22 22 0 0 1 22-22h196a22 22 0 0 1 22 22v34H1640z" fill="#DCFCE7"/>
+<text x="1760" y="348" font-size="15" font-weight="700" fill="#166534" text-anchor="middle">KV SECRET</text>
+<text x="1760" y="405" font-size="16" font-weight="700" fill="#0F172A" text-anchor="middle" font-family="Menlo, Consolas, 'DejaVu Sans Mono', monospace">secret/payments/app</text>
+<text x="1760" y="437" font-size="14" fill="#475569" text-anchor="middle">matches payments-read</text>
+<rect x="1670" y="455" width="180" height="25" rx="8" fill="#DCFCE7" stroke="#16A34A"/>
+<text x="1760" y="473" font-size="13" font-weight="700" fill="#166534" text-anchor="middle">data returned</text>
+
+<!-- Main flow -->
+<line x1="290" y1="395" x2="362" y2="395" stroke="#16A34A" stroke-width="4" marker-end="url(#green-arrow)"/>
+<circle cx="326" cy="370" r="16" fill="#16A34A"/><text x="326" y="376" font-size="15" font-weight="700" fill="#FFFFFF" text-anchor="middle">1</text>
+<text x="326" y="430" font-size="13" font-weight="700" fill="#166534" text-anchor="middle">local request</text>
+
+<line x1="730" y1="395" x2="812" y2="395" stroke="#64748B" stroke-width="4" marker-end="url(#slate-arrow)"/>
+<circle cx="771" cy="370" r="16" fill="#64748B"/><text x="771" y="376" font-size="15" font-weight="700" fill="#FFFFFF" text-anchor="middle">2</text>
+<text x="771" y="430" font-size="13" font-weight="700" fill="#475569" text-anchor="middle">sign login</text>
+
+<line x1="1120" y1="395" x2="1267" y2="395" stroke="#64748B" stroke-width="4" marker-end="url(#slate-arrow)"/>
+<circle cx="1194" cy="370" r="16" fill="#64748B"/><text x="1194" y="376" font-size="15" font-weight="700" fill="#FFFFFF" text-anchor="middle">3</text>
+<text x="1194" y="430" font-size="13" font-weight="700" fill="#475569" text-anchor="middle">TPM login + role</text>
+
+<line x1="1605" y1="402" x2="1632" y2="402" stroke="#16A34A" stroke-width="4" marker-end="url(#green-arrow)"/>
+<circle cx="1620" cy="370" r="16" fill="#16A34A"/><text x="1620" y="376" font-size="15" font-weight="700" fill="#FFFFFF" text-anchor="middle">5</text>
+
+<!-- One-time enrolment -->
+<path d="M1090 542 C1190 542 1190 348 1270 348" fill="none" stroke="#D97706" stroke-width="3.5" stroke-dasharray="10 7" marker-end="url(#amber-arrow)"/>
+<circle cx="1185" cy="516" r="16" fill="#D97706"/><text x="1185" y="522" font-size="15" font-weight="700" fill="#FFFFFF" text-anchor="middle">0</text>
+<text x="1185" y="556" font-size="13" font-weight="700" fill="#92400E" text-anchor="middle">one-time public EK enrolment</text>
+
+<!-- Token return callout -->
+<path d="M1275 625 C1160 704 780 704 705 535" fill="none" stroke="#16A34A" stroke-width="3.5" stroke-dasharray="9 7" marker-end="url(#green-arrow)"/>
+<circle cx="1000" cy="690" r="16" fill="#16A34A"/><text x="1000" y="696" font-size="15" font-weight="700" fill="#FFFFFF" text-anchor="middle">4</text>
+<text x="1000" y="722" font-size="13" font-weight="700" fill="#166534" text-anchor="middle">scoped token returned to Agent and forced on proxied requests</text>
+
+<!-- Walkthrough -->
+<rect x="30" y="780" width="1880" height="260" rx="26" fill="#FFFFFF" stroke="#D5DCE6" stroke-width="1.5" filter="url(#shadow)"/>
+<text x="60" y="823" font-size="23" font-weight="700" fill="#0F172A">Demo walkthrough</text>
+
+<circle cx="85" cy="875" r="20" fill="#D97706"/><text x="85" y="882" font-size="17" font-weight="700" fill="#FFFFFF" text-anchor="middle">0</text>
+<text x="120" y="871" font-size="16" font-weight="700" fill="#0F172A">Enrol once</text>
+<text x="120" y="895" font-size="14" fill="#475569">Register the VM's public EK and configure the role.</text>
+
+<circle cx="685" cy="875" r="20" fill="#16A34A"/><text x="685" y="882" font-size="17" font-weight="700" fill="#FFFFFF" text-anchor="middle">1</text>
+<text x="720" y="871" font-size="16" font-weight="700" fill="#0F172A">App calls locally</text>
+<text x="720" y="895" font-size="14" fill="#475569">Unix ownership limits access to payments.sock.</text>
+
+<circle cx="1285" cy="875" r="20" fill="#64748B"/><text x="1285" y="882" font-size="17" font-weight="700" fill="#FFFFFF" text-anchor="middle">2</text>
+<text x="1320" y="871" font-size="16" font-weight="700" fill="#0F172A">TPM signs</text>
+<text x="1320" y="895" font-size="14" fill="#475569">The private application key never leaves the TPM.</text>
+
+<circle cx="85" cy="965" r="20" fill="#64748B"/><text x="85" y="972" font-size="17" font-weight="700" fill="#FFFFFF" text-anchor="middle">3</text>
+<text x="120" y="961" font-size="16" font-weight="700" fill="#0F172A">Agent logs in</text>
+<text x="120" y="985" font-size="14" fill="#475569">The agent always selects the fixed payments-app role.</text>
+
+<circle cx="685" cy="965" r="20" fill="#16A34A"/><text x="685" y="972" font-size="17" font-weight="700" fill="#FFFFFF" text-anchor="middle">4</text>
+<text x="720" y="961" font-size="16" font-weight="700" fill="#0F172A">Vault scopes the token</text>
+<text x="720" y="985" font-size="14" fill="#475569">TPM identity + role resolve to payments-read only.</text>
+
+<circle cx="1285" cy="965" r="20" fill="#16A34A"/><text x="1285" y="972" font-size="17" font-weight="700" fill="#FFFFFF" text-anchor="middle">5</text>
+<text x="1320" y="961" font-size="16" font-weight="700" fill="#0F172A">Request succeeds</text>
+<text x="1320" y="985" font-size="14" fill="#475569">Agent forces its token; Vault returns only the allowed secret.</text>
+</svg>
